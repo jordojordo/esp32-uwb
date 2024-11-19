@@ -17,10 +17,10 @@ For ESP32 UWB Pro with Display
 
 #define UWB_RST 27 // Reset pin
 #define UWB_IRQ 34 // IRQ pin
-#define UWB_SS 4   // SPI select pin for UWB module (updated)
+#define UWB_SS 21   // SPI select pin for UWB module
 
-#define I2C_SDA 21 // I2C SDA pin (updated)
-#define I2C_SCL 22 // I2C SCL pin (updated)
+#define I2C_SDA 4 // I2C SDA pin
+#define I2C_SCL 5 // I2C SCL pin
 
 Adafruit_SSD1306 display(128, 64, &Wire, -1);
 
@@ -31,11 +31,11 @@ void setup()
     // Initialize I2C for the display
     Wire.begin(I2C_SDA, I2C_SCL);
     delay(1000);
-    if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C))
-    {
+    
+    // Address 0x3C for 128x32
+    if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
         Serial.println(F("SSD1306 allocation failed"));
-        for (;;)
-            ; // Don't proceed, loop forever
+        for (;;); // Don't proceed, loop forever
     }
     display.clearDisplay();
     logoshow();
@@ -45,7 +45,6 @@ void setup()
     DW1000Ranging.initCommunication(UWB_RST, UWB_SS, UWB_IRQ); // Reset, CS, IRQ pin
 
     // Set network configuration
-    DW1000Ranging.useDefaults();
     DW1000.setDeviceAddress(2);    // Unique address for the anchor
     DW1000.setNetworkId(10);       // Same network ID for all devices
     DW1000.enableMode(DW1000.MODE_LONGDATA_RANGE_LOWPOWER);  // Same mode as the tag
@@ -97,7 +96,6 @@ void logoshow(void)
     display.setTextSize(2);              // Normal 1:1 pixel scale
     display.setTextColor(SSD1306_WHITE); // Draw white text
     display.setCursor(0, 0);             // Start at top-left corner
-    display.println(F("Makerfabs"));
     display.println(F("UWB Anchor"));
 
     display.setTextSize(1);

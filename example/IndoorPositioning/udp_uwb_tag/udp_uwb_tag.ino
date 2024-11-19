@@ -1,13 +1,10 @@
-/*
-
-For ESP32 UWB or ESP32 UWB Pro
-
-*/
-
 #include <SPI.h>
 #include <DW1000Ranging.h>
 #include <WiFi.h>
 #include "link.h"
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
 
 #define SPI_SCK 18
 #define SPI_MISO 19
@@ -16,9 +13,14 @@ For ESP32 UWB or ESP32 UWB Pro
 #define PIN_RST 27
 #define PIN_IRQ 34
 
-const char *ssid = "Makerfabs";
-const char *password = "20160704";
-const char *host = "192.168.1.103";
+#define I2C_SDA 4
+#define I2C_SCL 5
+
+Adafruit_SSD1306 display(128, 64, &Wire, -1);
+
+const char *ssid = ""; // WiFi SSID
+const char *password = ""; // WiFi Password
+const char *host = ""; // Server IP
 WiFiClient client;
 
 struct MyLink *uwb_data;
@@ -26,15 +28,13 @@ int index_num = 0;
 long runtime = 0;
 String all_json = "";
 
-void setup()
-{
+void setup() {
     Serial.begin(115200);
 
     WiFi.mode(WIFI_STA);
     WiFi.setSleep(false);
     WiFi.begin(ssid, password);
-    while (WiFi.status() != WL_CONNECTED)
-    {
+    while (WiFi.status() != WL_CONNECTED) {
         delay(500);
         Serial.print(".");
     }
@@ -42,45 +42,44 @@ void setup()
     Serial.print("IP Address:");
     Serial.println(WiFi.localIP());
 
-    if (client.connect(host, 80))
-    {
-        Serial.println("Success");
-        client.print(String("GET /") + " HTTP/1.1\r\n" +
-                     "Host: " + host + "\r\n" +
-                     "Connection: close\r\n" +
-                     "\r\n");
+    // Initialize I2C communication
+    Wire.begin(I2C_SDA, I2C_SCL);
+
+    // Initialize the SSD1306 display
+    if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+        Serial.println(F("SSD1306 allocation failed"));
+        for (;;);
     }
+    display.clearDisplay();
 
-    delay(1000);
+    // Display the logo or initial message
+    logoshow();
 
-    //init the configuration
+    // Initialize UWB
     SPI.begin(SPI_SCK, SPI_MISO, SPI_MOSI);
     DW1000Ranging.initCommunication(PIN_RST, DW_CS, PIN_IRQ);
     DW1000Ranging.attachNewRange(newRange);
     DW1000Ranging.attachNewDevice(newDevice);
     DW1000Ranging.attachInactiveDevice(inactiveDevice);
 
-    //we start the module as a tag
+    // Start as tag
     DW1000Ranging.startAsTag("7D:00:22:EA:82:60:3B:9C", DW1000.MODE_LONGDATA_RANGE_LOWPOWER);
 
     uwb_data = init_link();
 }
 
-void loop()
-{
+void loop() {
     DW1000Ranging.loop();
-    if ((millis() - runtime) > 1000)
-    {
+
+    if ((millis() - runtime) > 1000) {
         make_link_json(uwb_data, &all_json);
         send_udp(&all_json);
+        display_uwb(uwb_data);  // Update the display
         runtime = millis();
     }
 }
 
-void newRange()
-{
-    char c[30];
-
+void newRange() {
     Serial.print("from: ");
     Serial.print(DW1000Ranging.getDistantDevice()->getShortAddress(), HEX);
     Serial.print("\t Range: ");
@@ -92,8 +91,7 @@ void newRange()
     fresh_link(uwb_data, DW1000Ranging.getDistantDevice()->getShortAddress(), DW1000Ranging.getDistantDevice()->getRange(), DW1000Ranging.getDistantDevice()->getRXPower());
 }
 
-void newDevice(DW1000Device *device)
-{
+void newDevice(DW1000Device *device) {
     Serial.print("ranging init; 1 device added ! -> ");
     Serial.print(" short:");
     Serial.println(device->getShortAddress(), HEX);
@@ -101,19 +99,79 @@ void newDevice(DW1000Device *device)
     add_link(uwb_data, device->getShortAddress());
 }
 
-void inactiveDevice(DW1000Device *device)
-{
+void inactiveDevice(DW1000Device *device) {
     Serial.print("delete inactive device: ");
     Serial.println(device->getShortAddress(), HEX);
 
     delete_link(uwb_data, device->getShortAddress());
 }
 
-void send_udp(String *msg_json)
-{
-    if (client.connected())
-    {
-        client.print(*msg_json);
-        Serial.println("UDP send");
+void send_udp(String *msg_json) {
+    if (!client.connected()) {
+        Serial.println("Client disconnected, attempting to reconnect...");
+        if (client.connect(host, 8080)) {
+            Serial.println("Connected to server");
+        } else {
+            Serial.println("Failed to connect to server");
+            return;
+        }
     }
+    client.print(*msg_json);
+    Serial.println("Data sent: " + *msg_json);
+}
+
+void logoshow(void) {
+    display.clearDisplay();
+
+    display.setTextSize(2);
+    display.setTextColor(SSD1306_WHITE);
+    display.setCursor(0, 0);
+    display.println(F("Makerfabs"));
+
+    display.setTextSize(1);
+    display.setCursor(0, 20);
+    display.println(F("DW1000 DEMO"));
+    display.display();
+    delay(2000);
+}
+
+void display_uwb(struct MyLink *p) {
+    Serial.println("display_uwb() called");
+
+    struct MyLink *temp = p;
+    int row = 0;
+
+    display.clearDisplay();
+    display.setTextColor(SSD1306_WHITE);
+
+    if (temp->next == NULL) {
+        display.setTextSize(2);
+        display.setCursor(0, 0);
+        display.println("No Anchor");
+        display.display();
+        return;
+    }
+
+    while (temp->next != NULL) {
+        temp = temp->next;
+
+        char c[30];
+        sprintf(c, "%.1f m", temp->range);
+        display.setTextSize(2);
+        display.setCursor(0, row++ * 32);
+        display.println(c);
+
+        display.println("");
+
+        sprintf(c, "%.2f dbm", temp->dbm);
+        display.setTextSize(2);
+        display.println(c);
+
+        if (row >= 1) {
+            break;
+        }
+    }
+    delay(100);
+    display.display();
+    return;
 }
